@@ -1,0 +1,95 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  password  String
+  clerkId   String?  @unique
+  phone     String?  @unique
+  phoneVerified Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  documents Document[]
+  chatSessions ChatSession[]
+  chatMessages ChatMessage[]
+
+  @@map("users")
+}
+
+model Document {
+  id             String   @id @default(cuid())
+  originalName   String
+  filename       String
+  size           Int
+  mimeType       String
+  path           String
+  processed      Boolean  @default(false)
+  classification String?
+  summary        String?
+  uploadedAt     DateTime @default(now())
+  
+  // Foreign keys
+  userId         String
+  
+  // Relations
+  user           User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chatSessions   ChatSession[]
+  chatMessages   ChatMessage[]
+
+  @@map("documents")
+}
+
+model ChatSession {
+  id        String   @id @default(cuid())
+  title     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Foreign keys
+  userId     String
+  documentId String?
+  
+  // Relations
+  user       User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  document   Document? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  messages   ChatMessage[]
+
+  @@map("chat_sessions")
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  message   String
+  response  String
+  mode      String   @default("qna") // qna, summarize, explain
+  sources   String?  // JSON array of sources
+  timestamp DateTime @default(now())
+  
+  // Foreign keys
+  userId       String
+  documentId   String?
+  sessionId    String
+  
+  // Relations
+  user         User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  document     Document? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  session      ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@map("chat_messages")
+}
