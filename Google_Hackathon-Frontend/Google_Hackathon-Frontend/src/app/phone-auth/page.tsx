@@ -8,7 +8,7 @@ export default function PhoneAuthPage() {
   const [mode, setMode] = useState<'login' | 'register'>('login')
   const router = useRouter()
 
-  const handleAuthSuccess = (userData: any) => {
+  const handleAuthSuccess = (userData: { user: unknown; token: string }) => {
     // Store user data and redirect
     console.log('Authentication successful:', userData)
     

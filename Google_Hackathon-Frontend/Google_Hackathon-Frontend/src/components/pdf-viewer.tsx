@@ -1,9 +1,8 @@
 "use client"
 
-import { useState, useCallback, useEffect } from 'react'
-import { Button } from "@/components/ui/button"
+import { useState, useEffect } from 'react'
 import { Progress } from "@/components/ui/progress"
-import { ChevronLeft, ChevronRight, ZoomIn, ZoomOut, FileText, AlertCircle } from 'lucide-react'
+import { FileText, Download, ExternalLink } from 'lucide-react'
 import { Card, CardContent } from "@/components/ui/card"
 
 // Simple PDF viewer without react-pdf for now
@@ -98,9 +97,19 @@ export function PDFViewer({ file, processingProgress }: PDFViewerProps) {
       {/* Alternative: Show PDF info if iframe doesn't work */}
       <div className="p-4 border-t bg-gray-50 dark:bg-gray-800">
         <div className="flex items-center space-x-2 text-sm text-gray-600 dark:text-gray-400">
-          <AlertCircle className="h-4 w-4" />
+          <Download className="h-4 w-4" />
           <span>
-            PDF viewer ready. Document is being analyzed by AI.
+            <a href={fileUrl} download={file.name}>
+              Download PDF
+            </a>
+          </span>
+        </div>
+        <div className="flex items-center space-x-2 text-sm text-gray-600 dark:text-gray-400">
+          <ExternalLink className="h-4 w-4" />
+          <span>
+            <a href={fileUrl} target="_blank" rel="noopener noreferrer">
+              Open in new tab
+            </a>
           </span>
         </div>
       </div>

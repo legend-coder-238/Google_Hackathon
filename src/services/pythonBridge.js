@@ -43,41 +43,66 @@ export class PythonBridge {
     }
   }
 
-  async runPythonScript(scriptName, args = []) {
+  async runPythonScript(scriptName, args = [], timeoutMs = 30000) {
     return new Promise((resolve, reject) => {
       const pythonProcess = spawn('python', [scriptName, ...args], {
         cwd: this.pythonPath,
-        stdio: 'pipe'
+        stdio: 'pipe',
+        env: {
+          ...process.env,
+          PYTHONIOENCODING: 'utf-8',  // Fix encoding issues
+          PYTHONUNBUFFERED: '1',      // Disable output buffering
+          PYTHONPATH: this.pythonPath  // Add current directory to Python path
+        }
       });
 
       let stdout = '';
       let stderr = '';
 
       pythonProcess.stdout.on('data', (data) => {
-        stdout += data.toString();
+        stdout += data.toString('utf8');  // Ensure UTF-8 encoding
       });
 
       pythonProcess.stderr.on('data', (data) => {
-        stderr += data.toString();
+        stderr += data.toString('utf8');  // Ensure UTF-8 encoding
       });
 
       pythonProcess.on('close', (code) => {
         if (code === 0) {
           try {
-            // Try to parse JSON response
-            const result = JSON.parse(stdout);
-            resolve(result);
+            // Clean output by removing any non-JSON content
+            const jsonStart = stdout.indexOf('{');
+            const jsonEnd = stdout.lastIndexOf('}') + 1;
+            
+            if (jsonStart !== -1 && jsonEnd > jsonStart) {
+              const jsonOutput = stdout.substring(jsonStart, jsonEnd);
+              const result = JSON.parse(jsonOutput);
+              resolve(result);
+            } else {
+              // If not JSON, return plain text
+              resolve({ success: true, output: stdout.trim() });
+            }
           } catch (parseError) {
-            // If not JSON, return plain text
+            logger.warn('Failed to parse JSON, returning raw output:', parseError);
             resolve({ success: true, output: stdout.trim() });
           }
         } else {
-          reject(new Error(`Python script failed with code ${code}: ${stderr}`));
+          reject(new Error(`Python script failed with code ${code}: ${stderr || stdout}`));
         }
       });
 
       pythonProcess.on('error', (error) => {
         reject(new Error(`Failed to spawn Python process: ${error.message}`));
+      });
+      
+      // Add configurable timeout to prevent hanging
+      const timeout = setTimeout(() => {
+        pythonProcess.kill('SIGTERM');
+        reject(new Error(`Python script execution timeout (${timeoutMs/1000}s)`));
+      }, timeoutMs);
+      
+      pythonProcess.on('close', () => {
+        clearTimeout(timeout);
       });
     });
   }
@@ -159,7 +184,7 @@ if __name__ == "__main__":
         fs.writeFileSync(wrapperScript, wrapperContent);
       }
 
-      const result = await this.runPythonScript('classify_wrapper.py', [filePath]);
+      const result = await this.runPythonScript('classify_wrapper.py', [filePath], 60000); // 60 seconds for classification
       return result;
 
     } catch (error) {
@@ -216,7 +241,7 @@ if __name__ == "__main__":
         fs.writeFileSync(wrapperScript, wrapperContent);
       }
 
-      const result = await this.runPythonScript('summarize_wrapper.py', [filePath, classification]);
+      const result = await this.runPythonScript('summarize_wrapper.py', [filePath, classification], 120000); // 2 minutes for summarization
       return result;
 
     } catch (error) {
@@ -274,7 +299,7 @@ if __name__ == "__main__":
         fs.writeFileSync(wrapperScript, wrapperContent);
       }
 
-      const result = await this.runPythonScript('ingest_wrapper.py', [filePath, documentId]);
+      const result = await this.runPythonScript('ingest_wrapper.py', [filePath, documentId], 90000); // 90 seconds for ingestion
       return result;
 
     } catch (error) {
@@ -354,7 +379,7 @@ if __name__ == "__main__":
         fs.writeFileSync(wrapperScript, wrapperContent);
       }
 
-      const result = await this.runPythonScript('chat_wrapper.py', [message, documentId || '', mode]);
+      const result = await this.runPythonScript('chat_wrapper.py', [message, documentId || '', mode], 90000); // 90 seconds for chat/summary
       
       if (result.success) {
         return {

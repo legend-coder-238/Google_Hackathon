@@ -6,11 +6,11 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { PhoneInputComponent } from "@/components/ui/phone-input"
 import { apiClient, handleApiError } from '@/lib/api'
-import { AlertCircle, CheckCircle, Phone, MessageSquare } from 'lucide-react'
+import { AlertCircle, CheckCircle, Phone } from 'lucide-react'
 
 interface PhoneAuthProps {
   mode: 'login' | 'register'
-  onSuccess: (userData: any) => void
+  onSuccess: (userData: { user: unknown; token: string }) => void
   onModeChange?: (mode: 'login' | 'register') => void
 }
 

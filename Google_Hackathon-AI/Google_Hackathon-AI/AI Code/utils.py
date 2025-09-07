@@ -1,7 +1,7 @@
 import logging
 import fitz  # PyMuPDF
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional, Union
 from datetime import datetime
 import os
 
@@ -12,12 +12,13 @@ except ImportError:
     HuggingFaceEmbeddings = None
     logging.warning("HuggingFace embeddings not available")
 
+# Import or create Document class
 try:
-    from langchain_core.documents import Document
+    from langchain_core.documents import Document  # type: ignore
 except ImportError:
     # Fallback Document class if langchain_core not available
     class Document:
-        def __init__(self, page_content: str, metadata: Dict = None):
+        def __init__(self, page_content: str, metadata: Optional[Dict[str, Any]] = None):
             self.page_content = page_content
             self.metadata = metadata or {}
 
@@ -81,12 +82,13 @@ class DocumentProcessor:
                 for page_num in range(total_pages):
                     try:
                         page = doc.load_page(page_num)
-                        text = page.get_text()
+                        # Extract text using PyMuPDF's get_text method
+                        text = page.get_text()  # type: ignore
                         
                         # If no text extracted, try alternative methods
                         if not text.strip():
-                            # Try to extract from images or other elements
-                            text = page.get_text("text")  # alternative extraction
+                            # Try to extract with different parameters
+                            text = page.get_text("text")  # type: ignore
                         
                         if text.strip():  # Only add non-empty pages
                             documents.append(Document(
@@ -128,27 +130,40 @@ class DocumentProcessor:
         """Load text document with improved encoding handling."""
         try:
             # Try different encodings
-            encodings = ['utf-8', 'utf-8-sig', 'latin-1', 'cp1252']
+            encodings = ['utf-8', 'utf-8-sig', 'latin-1', 'cp1252', 'ascii']
             content = None
+            used_encoding = None
             
             for encoding in encodings:
                 try:
                     with open(file_path, 'r', encoding=encoding) as file:
                         content = file.read()
+                        used_encoding = encoding
                         self.logger.info(f"Successfully read text file with {encoding} encoding")
                         break
-                except UnicodeDecodeError:
+                except (UnicodeDecodeError, UnicodeError) as e:
+                    self.logger.debug(f"Failed to read with {encoding}: {e}")
                     continue
             
             if content is None:
-                raise ValueError("Could not decode text file with any supported encoding")
+                # Try binary mode as last resort and decode manually
+                try:
+                    with open(file_path, 'rb') as file:
+                        raw_content = file.read()
+                        # Try to detect encoding
+                        content = raw_content.decode('utf-8', errors='replace')
+                        used_encoding = 'utf-8 (with replacement)'
+                        self.logger.warning(f"File read with character replacement: {file_path}")
+                except Exception as e:
+                    raise ValueError(f"Could not decode text file with any supported encoding: {e}")
                 
             return [Document(
                 page_content=content,
                 metadata={
                     'source': file_path,
                     'file_type': 'txt',
-                    'file_size': os.path.getsize(file_path)
+                    'file_size': os.path.getsize(file_path),
+                    'encoding_used': used_encoding
                 }
             )]
         except Exception as e:
@@ -229,8 +244,18 @@ class DocumentProcessor:
         """Extracts and concatenates text from all pages of a PDF."""
         try:
             with fitz.open(pdf_path) as doc:
-                # Using a generator expression for memory efficiency
-                return "\n\n".join(page.get_text() for page in doc)
+                # Using a generator expression for memory efficiency with proper error handling
+                texts = []
+                for page_num in range(doc.page_count):
+                    try:
+                        page = doc.load_page(page_num)
+                        text = page.get_text()  # type: ignore
+                        if text.strip():
+                            texts.append(text)
+                    except Exception as e:
+                        logger.warning(f"Error extracting text from page {page_num}: {e}")
+                        continue
+                return "\n\n".join(texts)
         except Exception as e:
             logger.error(f"Error extracting full text from {pdf_path}: {e}")
             raise
@@ -240,9 +265,9 @@ class DocumentProcessor:
         try:
             with fitz.open(pdf_path) as doc:
                 if not 0 <= page_number < doc.page_count:
-                    raise ValueError("Page number out of bounds.")
+                    raise ValueError(f"Page number {page_number} out of bounds. Document has {doc.page_count} pages.")
                 page = doc.load_page(page_number)
-                return page.get_text()
+                return page.get_text()  # type: ignore
         except Exception as e:
             logger.error(f"Error extracting text from page {page_number} of {pdf_path}: {e}")
             raise
@@ -283,3 +308,47 @@ class EmbeddingManager:
     def is_available(self) -> bool:
         """Check if embeddings are available."""
         return HuggingFaceEmbeddings is not None
+
+
+class DocumentSummarizer:
+    """Document summarization wrapper class for integration with the bridge."""
+    
+    def __init__(self):
+        self.logger = logging.getLogger(f"{__name__}.DocumentSummarizer")
+    
+    def summarize(self, text: str, max_length: int = 500) -> str:
+        """Summarize the given text.
+        
+        Args:
+            text: The text to summarize
+            max_length: Maximum length of the summary
+            
+        Returns:
+            str: The summarized text
+        """
+        try:
+            # Simple extractive summarization as fallback
+            # In production, this would use an AI model
+            sentences = text.split('. ')
+            if len(sentences) <= 3:
+                return text
+            
+            # Take first few sentences up to max_length
+            summary_parts = []
+            current_length = 0
+            
+            for sentence in sentences[:5]:  # Take up to 5 sentences
+                if current_length + len(sentence) > max_length:
+                    break
+                summary_parts.append(sentence)
+                current_length += len(sentence)
+            
+            summary = '. '.join(summary_parts)
+            if not summary.endswith('.'):
+                summary += '.'
+                
+            return summary or "Document summary not available."
+            
+        except Exception as e:
+            self.logger.error(f"Error summarizing text: {e}")
+            return "Error generating summary."

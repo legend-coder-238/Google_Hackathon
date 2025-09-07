@@ -12,7 +12,6 @@ interface DocumentUploadProps {
   onFileSelect: (file: File, documentId: string) => void
   selectedFile: File | null
   onFileRemove: () => void
-  documentId?: string
   uploadStatus?: 'idle' | 'uploading' | 'processing' | 'success' | 'error'
   uploadError?: string
 }
@@ -21,7 +20,6 @@ export function DocumentUpload({
   onFileSelect, 
   selectedFile, 
   onFileRemove, 
-  documentId,
   uploadStatus = 'idle',
   uploadError 
 }: DocumentUploadProps) {

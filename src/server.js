@@ -7,6 +7,7 @@ import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import winston from 'winston';
+import fs from 'fs-extra';
 
 // Route imports
 import uploadRoutes from './routes/upload.js';
@@ -56,8 +57,10 @@ app.use(helmet());
 app.use(compression());
 app.use(limiter);
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
-  credentials: true
+  origin: [process.env.FRONTEND_URL || 'http://localhost:3000', 'http://localhost:3000'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Clerk-User-Id', 'X-Clerk-User-Email', 'X-Clerk-User-Name']
 }));
 
 // Apply JSON parsing middleware only to non-upload routes
@@ -77,7 +80,6 @@ app.use((req, res, next) => {
 });
 
 // Create uploads directory if it doesn't exist
-import fs from 'fs-extra';
 const uploadsDir = join(__dirname, '../uploads');
 fs.ensureDirSync(uploadsDir);
 
@@ -85,6 +87,27 @@ fs.ensureDirSync(uploadsDir);
 app.use((req, res, next) => {
   logger.info(`${req.method} ${req.path} - ${req.ip}`);
   next();
+});
+
+// CORS preflight handler
+app.options('*', (req, res) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || 'http://localhost:3000');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Clerk-User-Id, X-Clerk-User-Email, X-Clerk-User-Name');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.sendStatus(200);
+});
+
+// Debug endpoint for troubleshooting
+app.get('/api/debug', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Debug endpoint working',
+    headers: req.headers,
+    timestamp: new Date().toISOString(),
+    corsOrigin: req.headers.origin || 'No origin header',
+    method: req.method
+  });
 });
 
 // Routes

@@ -1,15 +1,19 @@
 "use client"
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { MessageSquare, Plus, Trash2 } from 'lucide-react'
+import { Plus, Trash2 } from 'lucide-react'
+import { apiClient } from '@/lib/api'
 
 interface ChatSession {
   id: string
-  title: string
-  timestamp: Date
-  preview: string
+  title?: string
+  documentId?: string
+  documentName?: string
+  createdAt: string
+  updatedAt: string
+  lastMessage?: string
 }
 
 interface ChatSidebarProps {
@@ -19,26 +23,24 @@ interface ChatSidebarProps {
 }
 
 export function ChatSidebar({ currentChatId, onChatSelect, onNewChat }: ChatSidebarProps) {
-  const [chatSessions] = useState<ChatSession[]>([
-    {
-      id: '1',
-      title: 'Rental Agreement Analysis',
-      timestamp: new Date('2024-01-15'),
-      preview: 'Analyzed rental agreement for potential risks...'
-    },
-    {
-      id: '2', 
-      title: 'Employment Contract Review',
-      timestamp: new Date('2024-01-14'),
-      preview: 'Reviewed employment terms and conditions...'
-    },
-    {
-      id: '3',
-      title: 'Terms of Service Check',
-      timestamp: new Date('2024-01-13'),
-      preview: 'Examined privacy policy and data usage...'
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>([])                           
+
+  // Load chat sessions on component mount
+  useEffect(() => {
+    loadChatSessions()
+  }, [])
+
+  const loadChatSessions = async () => {
+    try {
+      const response = await apiClient.getChatSessions()
+      
+      if (response.success && response.data) {
+        setChatSessions(response.data)
+      }
+    } catch (err) {
+      console.error('Error loading chat sessions:', err)
     }
-  ])
+  }
 
   return (
     <div className="flex flex-col h-full bg-white dark:bg-gray-900 border-r">
@@ -84,10 +86,10 @@ export function ChatSidebar({ currentChatId, onChatSelect, onNewChat }: ChatSide
             </CardHeader>
             <CardContent className="pt-0">
               <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                {chat.preview}
+                {chat.lastMessage || 'No messages yet'}
               </p>
               <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                {chat.timestamp.toLocaleDateString()}
+                {new Date(chat.updatedAt).toLocaleDateString()}
               </p>
             </CardContent>
           </Card>

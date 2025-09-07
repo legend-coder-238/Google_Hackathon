@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { useAuthenticatedAPI } from "@/lib/useAuthenticatedAPI"
-import { Scale, FileText, MessageSquare, Shield, Zap, Users, LogOut, User, RefreshCw, AlertCircle } from "lucide-react"
+import { Scale, FileText, MessageSquare, Shield, Zap, LogOut, User, RefreshCw, AlertCircle } from "lucide-react"
 import { useEffect } from 'react'
 
 export default function Home() {

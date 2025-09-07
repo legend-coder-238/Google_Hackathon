@@ -130,7 +130,7 @@ export function SimplePDFViewer({ file, processingProgress }: SimplePDFViewerPro
                       PDF Viewer Not Available
                     </h3>
                     <p className="text-gray-600 dark:text-gray-300 mb-4">
-                      Your browser doesn't support inline PDF viewing, but the document has been uploaded successfully.
+                      Your browser doesn&apos;t support inline PDF viewing, but the document has been uploaded successfully.
                     </p>
                     <div className="space-y-2">
                       <Button onClick={handleOpenInNewTab} className="w-full">

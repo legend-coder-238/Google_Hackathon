@@ -11,6 +11,7 @@ import { DocumentUpload } from "@/components/document-upload"
 import { SimplePDFViewer } from "@/components/simple-pdf-viewer"
 import { ChatInterface } from "@/components/chat-interface"
 import { useAuthenticatedAPI } from "@/lib/useAuthenticatedAPI"
+import { apiClient, ChatMessage } from "@/lib/api"
 import { Scale, ArrowLeft, LogOut, User, RefreshCw, AlertCircle } from 'lucide-react'
 
 export default function ChatPage() {
@@ -23,6 +24,7 @@ export default function ChatPage() {
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'processing' | 'success' | 'error'>('idle')
   const [uploadError, setUploadError] = useState<string | undefined>()
   const [currentChatId, setCurrentChatId] = useState<string>()
+  const [selectedChatSession, setSelectedChatSession] = useState<{ sessionId: string; messages: ChatMessage[] } | null>(null)
 
   if (!isLoaded || isLoading) {
     return (
@@ -106,13 +108,31 @@ export default function ChatPage() {
     // Here you would integrate with your AI backend
   }
 
-  const handleChatSelect = (chatId: string) => {
+  const handleChatSelect = async (chatId: string) => {
     setCurrentChatId(chatId)
+    
+    try {
+      // Load the selected chat session messages
+      const response = await apiClient.getSessionMessages(chatId)
+      if (response.success && response.data) {
+        setSelectedChatSession(response.data)
+        // Clear document selection when loading a specific chat session
+        setSelectedFile(null)
+        setDocumentId(undefined)
+      }
+    } catch (error) {
+      console.error('Error loading chat session:', error)
+    }
   }
 
   const handleNewChat = () => {
     setCurrentChatId(undefined)
-    // Don't clear document data when starting new chat
+    setSelectedChatSession(null)
+    // Clear both document and chat session for fresh start
+    setSelectedFile(null)
+    setDocumentId(undefined)
+    setUploadStatus('idle')
+    setUploadError(undefined)
   }
 
   return (
@@ -176,7 +196,6 @@ export default function ChatPage() {
               onFileSelect={handleFileSelect}
               selectedFile={selectedFile}
               onFileRemove={handleFileRemove}
-              documentId={documentId}
               uploadStatus={uploadStatus}
               uploadError={uploadError}
             />
@@ -197,6 +216,8 @@ export default function ChatPage() {
             onSendMessage={handleSendMessage} 
             documentId={documentId}
             isDocumentReady={uploadStatus === 'success' && !!documentId}
+            selectedSessionId={currentChatId}
+            selectedSessionData={selectedChatSession}
           />
         </div>
       </div>

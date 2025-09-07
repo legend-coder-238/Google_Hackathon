@@ -2,7 +2,7 @@
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3001/api';
 
 // Types for API responses
-export interface ApiResponse<T = any> {
+export interface ApiResponse<T = unknown> {
   success: boolean;
   message?: string;
   data?: T;
@@ -74,6 +74,23 @@ export interface ChatResponse {
   sources: string[];
   mode: string;
   timestamp: string;
+  sessionId?: string;
+}
+
+export interface ClerkUser {
+  id: string;
+  emailAddresses: Array<{ emailAddress: string }>;
+  firstName?: string | null;
+}
+
+export interface ChatSession {
+  id: string;
+  title?: string;
+  documentId?: string;
+  documentName?: string;
+  createdAt: string;
+  updatedAt: string;
+  lastMessage?: string;
 }
 
 // API client class
@@ -112,7 +129,7 @@ class ApiClient {
     this.clerkToken = token;
   }
 
-  async authenticateWithClerk(user: any, getToken: () => Promise<string | null>): Promise<void> {
+  async authenticateWithClerk(user: ClerkUser, getToken: () => Promise<string | null>): Promise<void> {
     try {
       const clerkToken = await getToken();
       if (!clerkToken) {
@@ -127,7 +144,7 @@ class ApiClient {
         headers: {
           'X-Clerk-User-Id': user.id,
           'X-Clerk-User-Email': user.emailAddresses[0]?.emailAddress,
-          'X-Clerk-User-Name': user.firstName || user.emailAddresses[0]?.emailAddress?.split('@')[0],
+          'X-Clerk-User-Name': user.firstName || user.emailAddresses[0]?.emailAddress?.split('@')[0] || 'User',
           'Authorization': `Bearer ${clerkToken}`,
         },
       });
@@ -158,6 +175,10 @@ class ApiClient {
       defaultHeaders['Authorization'] = `Bearer ${this.authToken}`;
     }
 
+    // Create timeout signal with fallback for older browsers
+    let timeoutId: NodeJS.Timeout | undefined;
+    let abortController: AbortController | undefined;
+    
     const config: RequestInit = {
       ...options,
       headers: {
@@ -165,18 +186,69 @@ class ApiClient {
         ...options.headers,
       },
     };
+    
+    // Use AbortController for timeout if AbortSignal.timeout is not available
+    if (typeof AbortSignal.timeout === 'function') {
+      // Modern approach - use longer timeout for AI operations
+      const timeout = endpoint.includes('/chat/') ? 120000 : 30000; // 2 minutes for chat, 30s for others
+      config.signal = AbortSignal.timeout(timeout);
+    } else {
+      // Fallback for older browsers
+      abortController = new AbortController();
+      config.signal = abortController.signal;
+      const timeout = endpoint.includes('/chat/') ? 120000 : 30000; // 2 minutes for chat, 30s for others
+      timeoutId = setTimeout(() => {
+        abortController?.abort();
+      }, timeout);
+    }
 
     try {
       const response = await fetch(url, config);
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || `HTTP error! status: ${response.status}`);
+      
+      // Clear timeout if request completed
+      if (timeoutId) {
+        clearTimeout(timeoutId);
       }
-
+      
+      // Check if response is ok before trying to parse JSON
+      if (!response.ok) {
+        let errorMessage = `HTTP error! status: ${response.status}`;
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.message || errorMessage;
+        } catch {
+          // If JSON parsing fails, use the default error message
+        }
+        throw new Error(errorMessage);
+      }
+      
+      // Parse JSON response with error handling
+      let data;
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error('Invalid response format: Expected JSON but received invalid data');
+      }
+      
       return data;
     } catch (error) {
+      // Clear timeout if request failed
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      
       console.error('API request failed:', error);
+      
+      // Handle specific error types
+      if (error instanceof Error) {
+        if (error.name === 'AbortError') {
+          throw new Error('Request timeout: The server took too long to respond. Please try again.');
+        }
+        if (error.message.includes('fetch')) {
+          throw new Error('Network error: Unable to connect to the server. Please check your connection and try again.');
+        }
+      }
+      
       throw error;
     }
   }
@@ -312,7 +384,7 @@ class ApiClient {
         }
       });
       
-      // Handle completion
+  // Handle completion
       xhr.addEventListener('load', () => {
         try {
           const response = JSON.parse(xhr.responseText);
@@ -321,7 +393,7 @@ class ApiClient {
           } else {
             reject(new Error(response.message || `HTTP error! status: ${xhr.status}`));
           }
-        } catch (error) {
+        } catch {
           reject(new Error('Failed to parse response'));
         }
       });
@@ -371,20 +443,30 @@ class ApiClient {
   async sendChatMessage(
     message: string,
     documentId?: string,
-    mode: 'qna' | 'summarize' | 'explain' = 'qna'
-  ): Promise<ApiResponse<ChatResponse>> {
-    return this.request<ChatResponse>('/chat/message', {
+    mode: 'qna' | 'summarize' | 'explain' = 'qna',
+    sessionId?: string
+  ): Promise<ApiResponse<ChatResponse & { sessionId: string }>> {
+    return this.request<ChatResponse & { sessionId: string }>('/chat/message', {
       method: 'POST',
       body: JSON.stringify({
         message,
         documentId,
         mode,
+        sessionId,
       }),
     });
   }
 
-  async getChatHistory(documentId: string): Promise<ApiResponse<ChatMessage[]>> {
-    return this.request<ChatMessage[]>(`/chat/history/${documentId}`);
+  async getChatHistory(documentId: string): Promise<ApiResponse<{ documentId: string; history: ChatMessage[] }>> {
+    return this.request<{ documentId: string; history: ChatMessage[] }>(`/chat/history/${documentId}`);
+  }
+
+  async getChatSessions(): Promise<ApiResponse<ChatSession[]>> {
+    return this.request<ChatSession[]>('/chat/sessions');
+  }
+
+  async getSessionMessages(sessionId: string): Promise<ApiResponse<{ sessionId: string; messages: ChatMessage[] }>> {
+    return this.request<{ sessionId: string; messages: ChatMessage[] }>(`/chat/sessions/${sessionId}/messages`);
   }
 
   async clearChatHistory(documentId: string): Promise<ApiResponse> {
@@ -432,7 +514,7 @@ export class ApiError extends Error {
   }
 }
 
-export const handleApiError = (error: any): string => {
+export const handleApiError = (error: unknown): string => {
   if (error instanceof ApiError) {
     return error.message;
   }

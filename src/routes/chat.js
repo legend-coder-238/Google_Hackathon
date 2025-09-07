@@ -61,7 +61,21 @@ router.post('/message', authenticate, async (req, res) => {
     logger.info(`Processing chat - Document: ${documentId}, Mode: ${mode}`);
 
     // Process chat message with Python AI
-    const chatResponse = await pythonBridge.processChat(message, documentId, mode);
+    let chatResponse;
+    try {
+      chatResponse = await pythonBridge.processChat(message, documentId, mode);
+    } catch (error) {
+      // Handle timeout specifically
+      if (error.message.includes('timeout')) {
+        return res.status(408).json({
+          success: false,
+          message: 'Request timeout: The AI processing is taking longer than expected. Please try again with a shorter request or wait a moment.',
+          error: 'TIMEOUT',
+          timeout: true
+        });
+      }
+      throw error; // Re-throw other errors to be handled by outer catch
+    }
 
     // Save chat message to database
     const savedMessage = await ChatMessage.create({
