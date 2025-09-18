@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { ChatSidebar } from "@/components/chat-sidebar"
 import { DocumentUpload } from "@/components/document-upload"
-import { SimplePDFViewer } from "@/components/simple-pdf-viewer"
+import { ReliablePDFViewer } from "@/components/reliable-pdf-viewer"
 import { ChatInterface } from "@/components/chat-interface"
 import { Scale, ArrowLeft, LogOut, User } from 'lucide-react'
 
@@ -53,11 +53,12 @@ export default function ChatPage() {
     // Here you would integrate with your AI backend
   }
 
-  const handleChatSelect = (chatId: string) => {
-    setCurrentChatId(chatId)
+  const handleDocumentSelect = (docId: string) => {
+    setCurrentChatId(docId)
+    // In a real app, you would load the document data here
   }
 
-  const handleNewChat = () => {
+  const handleNewDocument = () => {
     setCurrentChatId(undefined)
     setSelectedFile(null)
     setProcessingProgress(0)
@@ -107,29 +108,31 @@ export default function ChatPage() {
 
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left Sidebar - Previous Chats */}
+        {/* Left Sidebar - Document Management */}
         <div className="w-80 border-r bg-white dark:bg-gray-900">
           <ChatSidebar
-            currentChatId={currentChatId}
-            onChatSelect={handleChatSelect}
-            onNewChat={handleNewChat}
+            currentDocId={currentChatId}
+            onDocumentSelect={handleDocumentSelect}
+            onNewDocument={handleNewDocument}
           />
         </div>
 
-        {/* Middle Section - Document Upload and Viewer */}
-        <div className="flex-1 flex flex-col border-r">
-          {/* Document Upload Area */}
-          <div className="p-4 border-b bg-white dark:bg-gray-900">
-            <DocumentUpload
-              onFileSelect={handleFileSelect}
-              selectedFile={selectedFile}
-              onFileRemove={handleFileRemove}
-            />
-          </div>
+        {/* Middle Section - PDF Viewer (Full Area) */}
+        <div className="flex-1 flex flex-col">
+          {/* Document Upload Area - Compact */}
+          {!selectedFile && (
+            <div className="p-4 border-b bg-white dark:bg-gray-900">
+              <DocumentUpload
+                onFileSelect={handleFileSelect}
+                selectedFile={selectedFile}
+                onFileRemove={handleFileRemove}
+              />
+            </div>
+          )}
 
-          {/* PDF Viewer */}
-          <div className="flex-1 bg-gray-100 dark:bg-gray-800">
-            <SimplePDFViewer
+          {/* PDF Viewer - Takes Full Remaining Space */}
+          <div className="flex-1">
+            <ReliablePDFViewer
               file={selectedFile}
               processingProgress={processingProgress}
             />
@@ -137,7 +140,7 @@ export default function ChatPage() {
         </div>
 
         {/* Right Section - Chat Interface */}
-        <div className="w-96">
+        <div className="w-96 border-l">
           <ChatInterface onSendMessage={handleSendMessage} />
         </div>
       </div>

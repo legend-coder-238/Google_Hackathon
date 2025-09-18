@@ -35,17 +35,17 @@ export function DocumentUpload({ onFileSelect, selectedFile, onFileRemove }: Doc
 
   if (selectedFile) {
     return (
-      <Card className="p-4">
+      <Card className="p-3 bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800">
         <CardContent className="p-0">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
-              <FileText className="h-8 w-8 text-red-600" />
+              <FileText className="h-6 w-6 text-red-600" />
               <div>
-                <p className="font-medium text-gray-900 dark:text-white">
+                <p className="font-medium text-gray-900 dark:text-white text-sm">
                   {selectedFile.name}
                 </p>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  {(selectedFile.size / 1024 / 1024).toFixed(2)} MB • Ready for analysis
                 </p>
               </div>
             </div>
@@ -53,6 +53,7 @@ export function DocumentUpload({ onFileSelect, selectedFile, onFileRemove }: Doc
               variant="outline"
               size="sm"
               onClick={onFileRemove}
+              className="h-8 w-8 p-0"
             >
               <X className="h-4 w-4" />
             </Button>
