@@ -26,8 +26,8 @@ class DocumentIngester:
     """Handles document ingestion and storage"""
     
     def __init__(self, 
-                 chunk_size: int = 1000, 
-                 chunk_overlap: int = 200,
+                 chunk_size: int = 2000, 
+                 chunk_overlap: int = 400,
                  embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"):
         """
         Initialize document ingester
