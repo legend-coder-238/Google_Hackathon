@@ -4,25 +4,30 @@ import { useState, useEffect } from 'react'
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Card, CardContent } from "@/components/ui/card"
-import { 
+import {
   Download,
   ExternalLink,
   FileText,
   AlertCircle,
   Loader2,
-  Maximize2,
-  RotateCw
+  Maximize2
 } from 'lucide-react'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
 interface ReliablePDFViewerProps {
   file: File | null
   processingProgress: number
+  isSummarizing?: boolean
+  onSummarizePage?: () => void
+  targetPage?: number
 }
 
-export function ReliablePDFViewer({ file, processingProgress }: ReliablePDFViewerProps) {
+export function ReliablePDFViewer({ file, processingProgress, isSummarizing = false, onSummarizePage, targetPage }: ReliablePDFViewerProps) {
   const [fileUrl, setFileUrl] = useState<string>('')
   const [viewerError, setViewerError] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [showPageNavigation, setShowPageNavigation] = useState(false)
 
   useEffect(() => {
     if (file) {
@@ -32,6 +37,23 @@ export function ReliablePDFViewer({ file, processingProgress }: ReliablePDFViewe
       return () => URL.revokeObjectURL(url)
     }
   }, [file])
+
+  // Handle page navigation when targetPage changes
+  useEffect(() => {
+    if (targetPage && targetPage !== currentPage) {
+      setCurrentPage(targetPage)
+      setShowPageNavigation(true)
+
+      // Update the iframe src to navigate to the specific page
+      const iframe = document.querySelector('iframe[title="PDF Document Viewer"]') as HTMLIFrameElement
+      if (iframe && fileUrl) {
+        iframe.src = `${fileUrl}#page=${targetPage}&toolbar=1&navpanes=1&scrollbar=1&view=FitH`
+      }
+
+      // Hide the navigation notification after 3 seconds
+      setTimeout(() => setShowPageNavigation(false), 3000)
+    }
+  }, [targetPage, currentPage, fileUrl])
 
   const handleDownload = () => {
     if (fileUrl && file) {
@@ -62,16 +84,16 @@ export function ReliablePDFViewer({ file, processingProgress }: ReliablePDFViewe
               <span className="text-white text-sm font-bold">AI</span>
             </div>
           </div>
-          
+
           <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
             Ready to Analyze Legal Documents
           </h3>
-          
+
           <p className="text-gray-600 dark:text-gray-300 mb-8 leading-relaxed">
-            Upload a PDF document to get started with AI-powered legal analysis. 
+            Upload a PDF document to get started with AI-powered legal analysis.
             I'll help you understand complex terms, identify risks, and answer your questions.
           </p>
-          
+
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
             <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm">
               <div className="w-8 h-8 bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center mx-auto mb-2">
@@ -80,7 +102,7 @@ export function ReliablePDFViewer({ file, processingProgress }: ReliablePDFViewe
               <p className="font-medium text-gray-900 dark:text-white">Upload PDF</p>
               <p className="text-gray-500 dark:text-gray-400 text-xs mt-1">Drag & drop or click</p>
             </div>
-            
+
             <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm">
               <div className="w-8 h-8 bg-green-100 dark:bg-green-900 rounded-full flex items-center justify-center mx-auto mb-2">
                 <AlertCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
@@ -88,7 +110,7 @@ export function ReliablePDFViewer({ file, processingProgress }: ReliablePDFViewe
               <p className="font-medium text-gray-900 dark:text-white">AI Analysis</p>
               <p className="text-gray-500 dark:text-gray-400 text-xs mt-1">Instant insights</p>
             </div>
-            
+
             <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm">
               <div className="w-8 h-8 bg-purple-100 dark:bg-purple-900 rounded-full flex items-center justify-center mx-auto mb-2">
                 <ExternalLink className="h-4 w-4 text-purple-600 dark:text-purple-400" />
@@ -142,8 +164,38 @@ export function ReliablePDFViewer({ file, processingProgress }: ReliablePDFViewe
             </p>
           </div>
         </div>
-        
+
         <div className="flex items-center space-x-2">
+          {/* Summarize Current Page Button */}
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="default"
+                  size="sm"
+                  className="summarize-page-button text-white font-medium shadow-md hover:shadow-lg transition-all duration-200 border-0"
+                  disabled={isSummarizing || !file}
+                  onClick={onSummarizePage}
+                >
+                  {isSummarizing ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2"></div>
+                      Summarizing...
+                    </>
+                  ) : (
+                    <>
+                      <FileText className="h-4 w-4 mr-2" />
+                      Summarize Page
+                    </>
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Get a quick summary of the currently visible page</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+
           <Button variant="outline" size="sm" onClick={toggleFullscreen}>
             <Maximize2 className="h-4 w-4" />
           </Button>
@@ -156,8 +208,18 @@ export function ReliablePDFViewer({ file, processingProgress }: ReliablePDFViewe
         </div>
       </div>
 
+      {/* Page Navigation Notification */}
+      {showPageNavigation && (
+        <div className="absolute top-20 right-4 z-10 bg-blue-600 text-white px-4 py-2 rounded-lg shadow-lg animate-in slide-in-from-right-2 fade-in-0">
+          <div className="flex items-center space-x-2">
+            <FileText className="h-4 w-4" />
+            <span className="text-sm font-medium">Navigating to page {currentPage}</span>
+          </div>
+        </div>
+      )}
+
       {/* PDF Viewer Area */}
-      <div className="flex-1 bg-gray-100 dark:bg-gray-800 p-4">
+      <div className="flex-1 bg-gray-100 dark:bg-gray-800 p-4 relative">
         {processingProgress < 100 ? (
           <div className="h-full flex items-center justify-center">
             <div className="text-center max-w-md">
@@ -171,7 +233,7 @@ export function ReliablePDFViewer({ file, processingProgress }: ReliablePDFViewe
                 Analyzing Legal Document
               </h3>
               <p className="text-gray-600 dark:text-gray-300 mb-4">
-                Our AI is reading through your document to identify key clauses, 
+                Our AI is reading through your document to identify key clauses,
                 potential risks, and important terms.
               </p>
               <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg">
@@ -186,7 +248,7 @@ export function ReliablePDFViewer({ file, processingProgress }: ReliablePDFViewe
             <CardContent className="p-0 h-full">
               {!viewerError ? (
                 <iframe
-                  src={`${fileUrl}#toolbar=1&navpanes=1&scrollbar=1&view=FitH`}
+                  src={`${fileUrl}#page=${currentPage}&toolbar=1&navpanes=1&scrollbar=1&view=FitH`}
                   className="w-full h-full border-0 rounded-lg"
                   title="PDF Document Viewer"
                   onError={() => setViewerError(true)}
@@ -199,7 +261,7 @@ export function ReliablePDFViewer({ file, processingProgress }: ReliablePDFViewe
                       PDF Viewer Unavailable
                     </h3>
                     <p className="text-gray-600 dark:text-gray-300 mb-6">
-                      Your browser doesn't support inline PDF viewing, but the document 
+                      Your browser doesn't support inline PDF viewing, but the document
                       has been uploaded successfully and is ready for AI analysis.
                     </p>
                     <div className="space-y-3">
@@ -224,12 +286,11 @@ export function ReliablePDFViewer({ file, processingProgress }: ReliablePDFViewe
       <div className="p-3 border-t bg-gray-50 dark:bg-gray-800">
         <div className="flex items-center justify-between text-sm">
           <div className="flex items-center space-x-2">
-            <div className={`w-2 h-2 rounded-full ${
-              processingProgress === 100 ? 'bg-green-500' : 'bg-yellow-500'
-            }`}></div>
+            <div className={`w-2 h-2 rounded-full ${processingProgress === 100 ? 'bg-green-500' : 'bg-yellow-500'
+              }`}></div>
             <span className="text-gray-600 dark:text-gray-400">
-              {processingProgress === 100 
-                ? 'Document ready - Ask me anything about this document!' 
+              {processingProgress === 100
+                ? 'This is a Ai bot. Please consider consulting a lawyer for your specific situation.'
                 : 'Processing document for AI analysis...'
               }
             </span>

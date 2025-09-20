@@ -84,6 +84,35 @@ export function ChatSidebar({ currentDocId, onDocumentSelect, onNewDocument }: D
           Upload Document
         </Button>
 
+        {/* Feature Toggle - Clause Extraction */}
+        <div className="mb-3 p-3 bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-900/20 dark:to-blue-900/20 rounded-lg border border-purple-200 dark:border-purple-800 relative overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-r from-purple-100/50 to-blue-100/50 dark:from-purple-800/30 dark:to-blue-800/30 animate-pulse"></div>
+          <div className="relative z-10">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center space-x-2">
+                <div className="w-2 h-2 bg-purple-500 rounded-full animate-pulse"></div>
+                <h4 className="text-sm font-semibold text-purple-700 dark:text-purple-300">
+                  Clause Extraction
+                </h4>
+              </div>
+              <Badge className="bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300 text-xs">
+                Coming Soon
+              </Badge>
+            </div>
+            <p className="text-xs text-purple-600 dark:text-purple-400">
+              AI-powered clause identification and analysis will be available here
+            </p>
+            <div className="mt-2 flex items-center space-x-1">
+              <div className="flex space-x-1">
+                <div className="w-1 h-1 bg-purple-400 rounded-full animate-bounce"></div>
+                <div className="w-1 h-1 bg-blue-400 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
+                <div className="w-1 h-1 bg-purple-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+              </div>
+              <span className="text-xs text-purple-500 dark:text-purple-400">Preparing...</span>
+            </div>
+          </div>
+        </div>
+
         {/* Quick Actions */}
         <div className="flex space-x-2">
           <Button variant="outline" size="sm" className="flex-1">
