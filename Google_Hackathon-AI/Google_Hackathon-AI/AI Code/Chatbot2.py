@@ -11,12 +11,12 @@ from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
 
 # LangChain imports
-from langchain.chains import ConversationalRetrievalChain, RetrievalQA
-from langchain.chains.question_answering import load_qa_chain
-from langchain_community.vectorstores import Pinecone, FAISS
-from langchain_core.documents import Document
+from langchain.chains import history_aware_retriever, conversational_retrieval
+from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain_community.vectorstores import FAISS
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import PromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.memory import ConversationBufferMemory
 
@@ -29,7 +29,7 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- PROMPT TEMPLATES FOR SUMMARIZATION ---
+# --- PROMPT TEMPLATES (omitted for brevity) ---
 PAGE_PROMPTS_BY_CATEGORY = {
     "TRANSACTIONAL": PromptTemplate(
         template=(
@@ -238,10 +238,22 @@ MASTER_SUMMARY_PROMPTS = {
     ),
 }
 
+CONCISE_SUMMARY_PROMPT = PromptTemplate(
+    input_variables=["detailed_summary"],
+    template=(
+        "You are an expert legal assistant. Your task is to convert the following structured, detailed summary of a single document page into a concise, easy-to-read paragraph. "
+        "The paragraph should be approximately 5-6 sentences long. "
+        "Use simple and clear language, avoiding complex legal jargon. "
+        "Focus only on the most critical points mentioned in the detailed summary and do not add any new information.\n\n"
+        "## Detailed Summary:\n\n{detailed_summary}\n\n"
+        "## Concise Paragraph Summary:"
+    )
+)
+
 class LegalDocumentChatbot:
     """RAG-powered chatbot for legal document analysis"""
-    
-    def __init__(self, 
+
+    def __init__(self,
                  vectorstore_path: str = "faiss_index",
                  embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",
                  gemini_api_key: str = None):
@@ -265,10 +277,14 @@ class LegalDocumentChatbot:
         self.doc_processor = DocumentProcessor()
         self.vectorstore = None
         self.llm = None
-        self.memory = ConversationBufferMemory(
-            memory_key="chat_history",
-            return_messages=True
-        )
+        
+        # >>>>> CHANGE 1: Initialize page_summaries attribute here <<<<<
+        self.page_summaries: List[str] = [] 
+        
+        # --- MODERN CONVERSATIONAL APPROACH ---
+        # No need for a separate memory object. We will manage history manually.
+        self.chat_history: List = [] 
+        self.rag_chain = None # The new, combined RAG chain
         
         # Load vector store
         self._load_vectorstore()
@@ -306,11 +322,10 @@ class LegalDocumentChatbot:
     def _initialize_llm(self):
         """Initialize the language model"""
         try:
-            # Use real Gemini API
             self.llm = ChatGoogleGenerativeAI(
-                model="gemini-2.0-flash",
+                model="gemini-1.5-flash", # Use the latest powerful flash model
                 google_api_key=self.gemini_api_key,
-                temperature=0.3
+                temperature=0.2 # Slightly lower for more factual answers
             )
             logger.info("Initialized Gemini LLM with API key")
                 
@@ -319,125 +334,75 @@ class LegalDocumentChatbot:
             raise
     
     def _initialize_chains(self):
-        """Initialize the RAG chains"""
-        
-        self.qa_prompt = PromptTemplate(
-            input_variables=["context", "question"],
-            template="""
-            You are a legal document assistant. Answer the following question based on the 
-            provided legal document content. Provide clear, accurate, and helpful information.
-            
-            Document Content:
-            {context}
-            
-            Question: {question}
-            
-            Answer:
-            """
-        )
-        
-        self.explain_prompt = PromptTemplate(
-            input_variables=["context", "clause"],
-            template="""
-            You are a legal document assistant. Explain the following legal clause or section 
-            in simple, easy-to-understand language. Break down complex legal terms and explain 
-            what they mean for the average person.
-            
-            Document Content:
-            {context}
-            
-            Clause/Section to Explain: {clause}
-            
-            Explanation:
-            """
-        )
-        
-        # Initialize chains
-        self.qa_chain = load_qa_chain(
-            llm=self.llm,
-            chain_type="stuff",
-            prompt=self.qa_prompt
-        )
-        
+        """Initialize the RAG chains using the modern LangChain approach"""
+        if not self.vectorstore:
+            logger.error("Vector store not initialized. Cannot create conversational chain.")
+            return
 
+        retriever = self.vectorstore.as_retriever(search_kwargs={"k": 4})
+
+        # 1. Chain to rephrase the follow-up question
+        rephrase_prompt = ChatPromptTemplate.from_messages([
+            ("system", "Given a chat history and the latest user question "
+                     "which might reference context in the chat history, "
+                     "formulate a standalone question which can be understood "
+                     "without the chat history. Do NOT answer the question, "
+                     "just reformulate it if needed and otherwise return it as is."),
+            ("placeholder", "{chat_history}"),
+            ("human", "{input}"),
+        ])
         
-        self.explain_chain = load_qa_chain(
-            llm=self.llm,
-            chain_type="stuff",
-            prompt=self.explain_prompt
+        history_aware_retriever = history_aware_retriever(
+            self.llm, retriever, rephrase_prompt
         )
-    
-    def answer_question(self, question: str, max_chunks: int = 5) -> str:
+
+        # 2. Chain to answer the question based on context
+        qa_prompt = ChatPromptTemplate.from_messages([
+            ("system", "You are a legal document assistant. Answer the following question based on the "
+                     "provided legal document content. Provide clear, accurate, and helpful information. "
+                     "If the information is not in the context, say that you cannot find the answer in the document.\n\n"
+                     "Document Content:\n{context}"),
+            ("human", "{input}"),
+        ])
+        
+        question_answer_chain = create_stuff_documents_chain(self.llm, qa_prompt)
+
+        # 3. Combine them into the final RAG chain
+        self.rag_chain = conversational_retrieval(history_aware_retriever, question_answer_chain)
+        logger.info("Initialized modern RAG chain (create_retrieval_chain)")
+        
+    def answer_question(self, question: str) -> str:
         """
-        Answer a question based on the uploaded documents
+        Answer a question based on the uploaded documents, maintaining conversation history.
         
         Args:
             question: User's question
-            max_chunks: Maximum number of chunks to retrieve
             
         Returns:
             Answer to the question
         """
         try:
-            if not self.vectorstore:
-                return "No documents have been uploaded yet. Please upload a document first."
+            if not self.rag_chain:
+                return "The Question-Answering system is not initialized. Please upload a document first."
             
             if not question.strip():
                 return "Please provide a question to answer."
-            
-            # Retrieve relevant chunks
-            docs = self.vectorstore.similarity_search(
-                question,
-                k=max_chunks
-            )
-            
-            # Generate answer
-            response = self.qa_chain.run({
-                "input_documents": docs,
-                "question": question
+
+            # Invoke the modern RAG chain with the current chat history
+            response = self.rag_chain.invoke({
+                "chat_history": self.chat_history,
+                "input": question
             })
             
-            return response
+            # Update the chat history
+            self.chat_history.append(HumanMessage(content=question))
+            self.chat_history.append(AIMessage(content=response["answer"]))
+            
+            return response.get('answer', "Sorry, I couldn't generate an answer.")
             
         except Exception as e:
             logger.error(f"Error answering question: {str(e)}")
             return f"Error answering question: {str(e)}"
-    
-    def explain_clause(self, clause: str, max_chunks: int = 5) -> str:
-        """
-        Explain a specific legal clause or section
-        
-        Args:
-            clause: The clause or section to explain
-            max_chunks: Maximum number of chunks to retrieve
-            
-        Returns:
-            Explanation of the clause
-        """
-        try:
-            if not self.vectorstore:
-                return "No documents have been uploaded yet. Please upload a document first."
-            
-            if not clause.strip():
-                return "Please provide a clause or section to explain."
-            
-            # Retrieve relevant chunks
-            docs = self.vectorstore.similarity_search(
-                clause,
-                k=max_chunks
-            )
-            
-            # Generate explanation
-            response = self.explain_chain.run({
-                "input_documents": docs,
-                "clause": clause
-            })
-            
-            return response
-            
-        except Exception as e:
-            logger.error(f"Error explaining clause: {str(e)}")
-            return f"Error explaining clause: {str(e)}"
     
     def get_document_info(self) -> Dict[str, Any]:
         """
@@ -450,10 +415,8 @@ class LegalDocumentChatbot:
             if not self.vectorstore:
                 return {"status": "No documents loaded"}
             
-            # Get document count
             doc_count = len(self.vectorstore.docstore._dict)
             
-            # Get sample documents
             sample_docs = self.vectorstore.similarity_search("", k=3)
             sources = list(set([doc.metadata.get('source', 'Unknown') for doc in sample_docs]))
             
@@ -471,34 +434,24 @@ class LegalDocumentChatbot:
     def summarize_document(self, pdf_path: str, category: Optional[str] = None) -> Dict[str, Any]:
         """
         Summarizes each page of a legal document and also generates a master summary.
-
-        Args:
-            pdf_path: The path to the PDF document.
-            category: The legal category of the document (e.g., "TRANSACTIONAL"). 
-                    If None, it will be classified automatically.
-
-        Returns:
-            A dictionary containing:
-                - 'page_summaries': List of page-wise summaries
-                - 'master_summary': Combined master summary of the entire document
         """
         if not self.llm:
             raise ValueError("LLM not initialized. Cannot summarize.")
 
-        # 1. Classify document if category is not provided
         if not category:
             try:
                 from doc_classification import classify_document
                 category = classify_document(pdf_path)
             except (ImportError, ModuleNotFoundError):
                 category = "OTHERS"
-            except Exception as e:
+            except Exception:
                 category = "OTHERS"
 
         prompt = PAGE_PROMPTS_BY_CATEGORY.get(str(category), PAGE_PROMPTS_BY_CATEGORY["OTHERS"])
         master_prompt = MASTER_SUMMARY_PROMPTS.get(str(category), MASTER_SUMMARY_PROMPTS["OTHERS"])
 
-        page_summaries = []
+        # >>>>> CHANGE 2: Assign the generated summaries to self.page_summaries <<<<<
+        self.page_summaries = [] 
         page_summary_chain = prompt | self.llm | StrOutputParser()
 
         page_count = self.doc_processor.get_page_count(pdf_path)
@@ -507,20 +460,37 @@ class LegalDocumentChatbot:
             page_text = self.doc_processor.get_text_from_page(pdf_path, i)
             if page_text.strip():
                 summary = page_summary_chain.invoke({"chunk": page_text})
-                page_summaries.append(summary)
+                self.page_summaries.append(summary)
 
-        # Generate master summary from all page summaries
-        combined_summaries = "\n\n---\n\n".join(page_summaries)
+        combined_summaries = "\n\n---\n\n".join(self.page_summaries)
         master_summary_chain = master_prompt | self.llm | StrOutputParser()
         master_summary = master_summary_chain.invoke({"combined_summaries": combined_summaries})
 
         return {
-            "page_summaries": page_summaries,
+            "page_summaries": self.page_summaries,
             "master_summary": master_summary
         }
-    def output_parser(self, output: str) -> str:
-        """Parse the output of the LLM into a string"""
-        
+    
+    def get_concise_page_summary(self, page_number: int) -> str:
+        """
+        Generates a concise, 5-6 sentence summary for a single, specific page.
+        """
+        if not self.page_summaries:
+            return "Error: Please summarize a document first before requesting a page summary."
+
+        index = page_number - 1
+        if not (0 <= index < len(self.page_summaries)):
+            return f"Error: Invalid page number. Please provide a number between 1 and {len(self.page_summaries)}."
+
+        try:
+            detailed_summary = self.page_summaries[index]
+            concise_chain = CONCISE_SUMMARY_PROMPT | self.llm | StrOutputParser()
+            concise_summary = concise_chain.invoke({"detailed_summary": detailed_summary})
+            return concise_summary
+        except Exception as e:
+            logger.error(f"Error generating concise summary for page {page_number}: {str(e)}")
+            return f"An error occurred while summarizing page {page_number}."
+
 def create_chatbot(api_key: str):
     """Create a chatbot instance with the provided API key"""
     return LegalDocumentChatbot(
@@ -529,33 +499,41 @@ def create_chatbot(api_key: str):
     )
 
 if __name__ == "__main__":
-    # Add project root to path for direct execution
     if __package__ is None:
         import sys
         sys.path.append(str(Path(__file__).parent.parent))
 
-    # Example usage - requires API key
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         print("Error: GEMINI_API_KEY environment variable not set")
         exit(1)
     
-
     chatbot = create_chatbot(api_key)
     
-    # Test different modes
-    print("\n=== Document Summary ===")
-    summary = chatbot.summarize_document(pdf_path=r"E:\SUMGRIND\SAMPLE LEGAL DOCS\DUMMYDOCS.txt")
-    print(summary)
+    # --- Example Usage ---
+    pdf_for_summary = r"path/to/your/document.pdf" # <-- IMPORTANT: SET YOUR PDF PATH HERE
     
-    print("\n=== Question Answering ===")
-    answer = chatbot.answer_question("What is the monthly rent?")
-    print(answer)
+    if os.path.exists(pdf_for_summary):
+        print("\n=== Document Summary ===")
+        summary_data = chatbot.summarize_document(pdf_path=pdf_for_summary)
+        print("--- MASTER SUMMARY ---")
+        print(summary_data["master_summary"])
+        print("\n--- CONCISE SUMMARY FOR PAGE 1 ---")
+        concise_summary = chatbot.get_concise_page_summary(page_number=1)
+        print(concise_summary)
+    else:
+        print(f"File not found: {pdf_for_summary}. Skipping summarization test.")
+
+    print("\n=== Question Answering (with Memory) ===")
     
-    print("\n=== Clause Explanation ===")
-    explanation = chatbot.explain_clause("termination clause")
-    print(explanation)
+    # First question
+    question1 = "What is the agreement's effective date?"
+    print(f"User: {question1}")
+    answer1 = chatbot.answer_question(question1)
+    print(f"Chatbot: {answer1}")
     
-    print("\n=== Document Info ===")
-    info = chatbot.get_document_info()
-    print(info)
+    # Second question that relies on the context of the first
+    question2 = "What are the termination conditions related to it?"
+    print(f"\nUser: {question2}")
+    answer2 = chatbot.answer_question(question2)
+    print(f"Chatbot: {answer2}")

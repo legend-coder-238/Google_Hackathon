@@ -287,7 +287,32 @@ class DocumentIngestor:
 
 
 if __name__ == "__main__":
-    # Example usage
-    ingester = DocumentIngester()
-    
+    import argparse
+    import sys
 
+    # Add project root to path for direct execution
+    if __package__ is None:
+        sys.path.append(str(Path(__file__).parent.parent))
+
+    parser = argparse.ArgumentParser(
+        description="Ingest a document into a FAISS vector store for the chatbot.",
+        formatter_class=argparse.RawTextHelpFormatter
+    )
+    parser.add_argument("file_path", type=str, help="The path to the document to ingest (e.g., a PDF, TXT, or DOCX file).")
+    parser.add_argument("--save_path", type=str, default="faiss_index", help="The directory to save the FAISS index to (default: faiss_index).")
+    args = parser.parse_args()
+
+    # The embedding manager uses a sentence-transformer model which doesn't require an API key.
+    # However, other parts of the ecosystem do, so it's good practice to check.
+    if not os.getenv("GEMINI_API_KEY"):
+        print("Warning: GEMINI_API_KEY environment variable not set. This is needed for the chatbot itself.")
+
+    try:
+        ingester = DocumentIngester()
+        print(f"Starting ingestion for: {args.file_path}")
+        ingester.ingest_document(file_path=args.file_path, storage_type="faiss", faiss_save_path=args.save_path)
+        print(f"\nSuccessfully created vector database at: '{args.save_path}'")
+        print("You can now run 'python chatbot2.py' to ask questions about your document.")
+    except Exception as e:
+        logger.error(f"An error occurred during ingestion: {e}", exc_info=True)
+        sys.exit(1)
