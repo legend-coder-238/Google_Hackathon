@@ -50,9 +50,7 @@ class OptimizedLegalAnalyzer:
             max_output_tokens=2048
         )
 
-
-
-    def _create_analysis_prompt(self) -> str:
+    def _create_analysis_prompt(self, document_chunk: str) -> str:
         """Create a focused prompt for clause extraction"""
         template = {
             "document_title": "string",
@@ -68,27 +66,25 @@ class OptimizedLegalAnalyzer:
             ]
         }
         
-        # REMOVED the 'f' from the beginning of the string below
-        # CHANGED {{...}} to {...}
-        return """You are a senior legal analyst. Analyze the document chunk below and extract key clauses.
+        return f"""You are a senior legal analyst. Analyze the document chunk below and extract key clauses.
 
-    OUTPUT REQUIREMENTS:
-    - Return ONLY valid JSON matching this exact template:
-    {json_template}
+OUTPUT REQUIREMENTS:
+- Return ONLY valid JSON matching this exact template:
+{json.dumps(template, indent=2)}
 
-    ANALYSIS GUIDELINES:
-    - Identify ONLY the 3-6 HIGHEST RISK clauses from the text
-    - Focus ONLY on HIGH and CRITICAL risk clauses, ignore LOW and MEDIUM risk items
-    - Each clause summary should be exactly 2-3 sentences
-    - Risk levels: HIGH (potential issues), CRITICAL (major concerns)
-    - Use the page numbers provided in the text
+ANALYSIS GUIDELINES:
+- Identify ONLY the 3-6 HIGHEST RISK clauses from the text
+- Focus ONLY on HIGH and CRITICAL risk clauses, ignore LOW and MEDIUM risk items
+- Each clause summary should be exactly 2-3 sentences
+- Risk levels: HIGH (potential issues), CRITICAL (major concerns)
+- Use the page numbers provided in the text
 
-    Document Chunk:
-    ---
-    {document_chunk}
-    ---
+Document Chunk:
+---
+{document_chunk}
+---
 
-    JSON OUTPUT:""".format(json_template=json.dumps(template, indent=2)) # Format the template part here
+JSON OUTPUT:"""
 
     def _analyze_chunk(self, chunk_text: str, chunk_number: int) -> Dict[Any, Any]:
         """Analyze a single chunk using direct Gemini API"""
@@ -96,8 +92,7 @@ class OptimizedLegalAnalyzer:
 
         try:
             print(f"DEBUG: About to create prompt")
-            prompt_template = self._create_analysis_prompt()
-            prompt = prompt_template.format(document_chunk=chunk_text)
+            prompt = self._create_analysis_prompt(chunk_text)
             print(f"DEBUG: Prompt created successfully")
             
             logger.info(f"Analyzing chunk {chunk_number} (approx {len(chunk_text)} chars)...")

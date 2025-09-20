@@ -96,7 +96,6 @@ class DocumentProcessor:
                                     'page': page_num + 1,  # 1-indexed page numbers
                                     'total_pages': total_pages,
                                     'file_type': 'pdf',
-                                    'file_size': os.path.getsize(file_path)
                                 }
                             ))
                         else:
