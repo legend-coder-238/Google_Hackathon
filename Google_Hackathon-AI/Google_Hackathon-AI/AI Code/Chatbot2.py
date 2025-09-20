@@ -11,8 +11,9 @@ from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
 
 # LangChain imports
-from langchain.chains import history_aware_retriever, conversational_retrieval
+from langchain.chains.retrieval import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain.chains.history_aware_retriever import create_history_aware_retriever
 from langchain_community.vectorstores import FAISS
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.output_parsers import StrOutputParser
@@ -352,23 +353,27 @@ class LegalDocumentChatbot:
             ("human", "{input}"),
         ])
         
-        history_aware_retriever = history_aware_retriever(
+        context_retriever = create_history_aware_retriever(
             self.llm, retriever, rephrase_prompt
         )
 
-        # 2. Chain to answer the question based on context
+
         qa_prompt = ChatPromptTemplate.from_messages([
             ("system", "You are a legal document assistant. Answer the following question based on the "
-                     "provided legal document content. Provide clear, accurate, and helpful information. "
-                     "If the information is not in the context, say that you cannot find the answer in the document.\n\n"
-                     "Document Content:\n{context}"),
+                    "provided legal document content. Provide clear, accurate, and helpful information. "
+                    "When asked to explain a specific article or clause, ensure your answer is comprehensive. "
+                    "Include all relevant sub-sections, parts, and conditions mentioned in the provided text. Do not omit details. "
+                    "If the information is not in the context, say that you cannot find the answer in the document.\n\n"
+                    "**IMPORTANT: Your entire response must be in plain text. Do not use any Markdown formatting like asterisks for bolding or bullet points.**\n\n"
+                    "Document Content:\n{context}"),
+            ("placeholder", "{chat_history}"),
             ("human", "{input}"),
         ])
         
         question_answer_chain = create_stuff_documents_chain(self.llm, qa_prompt)
 
         # 3. Combine them into the final RAG chain
-        self.rag_chain = conversational_retrieval(history_aware_retriever, question_answer_chain)
+        self.rag_chain = create_retrieval_chain(context_retriever, question_answer_chain)
         logger.info("Initialized modern RAG chain (create_retrieval_chain)")
         
     def answer_question(self, question: str) -> str:
@@ -417,7 +422,7 @@ class LegalDocumentChatbot:
             
             doc_count = len(self.vectorstore.docstore._dict)
             
-            sample_docs = self.vectorstore.similarity_search("", k=3)
+            sample_docs = self.vectorstore.similarity_search("", k=5)
             sources = list(set([doc.metadata.get('source', 'Unknown') for doc in sample_docs]))
             
             return {
@@ -527,13 +532,13 @@ if __name__ == "__main__":
     print("\n=== Question Answering (with Memory) ===")
     
     # First question
-    question1 = "What is the agreement's effective date?"
+    question1 = "explain article 7"
     print(f"User: {question1}")
     answer1 = chatbot.answer_question(question1)
     print(f"Chatbot: {answer1}")
     
     # Second question that relies on the context of the first
-    question2 = "What are the termination conditions related to it?"
+    question2 = "what is most important thing about above question answer??"
     print(f"\nUser: {question2}")
     answer2 = chatbot.answer_question(question2)
     print(f"Chatbot: {answer2}")
