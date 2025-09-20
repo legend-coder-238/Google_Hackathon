@@ -31,7 +31,11 @@ Legal-AI-Advisor/
                   └──chat-sidebar.tsx
                   └──clause-extra.tsx
                   └──document-upload.tsx
-                  └──
+                  └──simple-pdf-viewer.tsx
+                  └──theme-provider.tsx
+                  └──theme-toggle.tsx
+                  └──user-menu.tsx
+                  
 ```            ├──lib/
 
 ## 🚀 Quick Start
