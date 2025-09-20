@@ -24,8 +24,15 @@ Legal-AI-Advisor/
 │           └── doc_classification.py  # Document classification
 └── Google_Hackathon-Frontend/    # React frontend
     └── Google_Hackathon-Frontend/
-        └── src/                  # React application
-```
+        └── src/
+               ├── app/
+               ├──components/
+                  └──chat-interface.tsx                    # React application
+                  └──chat-sidebar.tsx
+                  └──clause-extra.tsx
+                  └──document-upload.tsx
+                  └──
+```            ├──lib/
 
 ## 🚀 Quick Start
 
@@ -62,9 +69,10 @@ cd ../..
 cp .env.example .env
 ```
 
-2. Edit `.env` and add your Google Gemini API key:
+2. Edit `.env` and add your Google Gemini API key ,:
 ```env
 GEMINI_API_KEY=your_actual_api_key_here
+
 ```
 
 ### 4. Start the Application
