@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field, ValidationError
 from dotenv import load_dotenv
 import google.generativeai as genai
 from utils import DocumentProcessor
+from enum import Enum
 
 # Load environment variables
 load_dotenv()
@@ -28,11 +29,15 @@ genai.configure(api_key=GEMINI_API_KEY)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- Pydantic Models ---
+# --- Pydantic Models (UPDATED) ---
+class RiskLevel(str, Enum):
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
+
 class ClauseAnalysis(BaseModel):
     clause_title: str = Field(..., description="A short descriptive title of the clause")
     clause_summary: str = Field(..., description="A concise 2-3 sentence summary of the clause")
-    risk_level: str = Field(..., description="Risk level: LOW, MEDIUM, HIGH, CRITICAL")
+    risk_level: RiskLevel = Field(..., description="Risk level: HIGH or CRITICAL")
     risk_explanation: str = Field(..., description="Brief explanation for the assigned risk")
     page_number: int = Field(..., description="Page number where the clause appears")
 
@@ -50,11 +55,10 @@ class OptimizedLegalAnalyzer:
             max_output_tokens=2048
         )
 
+    # --- NECESSARY CHANGE 1: A MUCH SMARTER PROMPT ---
     def _create_analysis_prompt(self, document_chunk: str) -> str:
-        """Create a focused prompt for clause extraction"""
+        """Create a focused prompt with clear risk definitions and examples."""
         template = {
-            "document_title": "string",
-            "document_type": "string", 
             "clauses": [
                 {
                     "clause_title": "string",
@@ -66,20 +70,28 @@ class OptimizedLegalAnalyzer:
             ]
         }
         
-        return f"""You are a senior legal analyst. Analyze the document chunk below and extract key clauses.
+        return f"""You are a senior legal analyst reviewing a contract for your client. Your task is to identify only genuinely risky, one-sided, or ambiguous clauses.
 
 OUTPUT REQUIREMENTS:
 - Return ONLY valid JSON matching this exact template:
 {json.dumps(template, indent=2)}
 
 ANALYSIS GUIDELINES:
-- Identify ONLY the 3-6 HIGHEST RISK clauses from the text
-- Focus ONLY on HIGH and CRITICAL risk clauses, ignore LOW and MEDIUM risk items
-- Each clause summary should be exactly 2-3 sentences
-- Risk levels: HIGH (potential issues), CRITICAL (major concerns)
-- Use the page numbers provided in the text
+1.  **Focus on True Risk:** A clause is risky if it is one-sided, ambiguous, or imposes an unfair burden on one party.
+2.  **Ignore Standard Clauses:** Do NOT flag standard, mutual clauses that apply to "Either Party" (like standard termination for insolvency or basic confidentiality) unless they contain unusual, one-sided language.
+3.  **Identify 3-5 Highest Risk Clauses Only:** Be selective. Only extract HIGH or CRITICAL risk items.
 
-Document Chunk:
+---
+EXAMPLE OF A TRUE CRITICAL RISK (YOU SHOULD EXTRACT THIS):
+- **Clause Text:** "Service Provider may amend the terms of this Agreement, including Fees, at any time upon providing five (5) days' notice to Client."
+- **Why it's Risky:** This is a UNILATERAL AMENDMENT clause. It gives all power to one party, which is a critical risk.
+
+EXAMPLE OF A FALSE POSITIVE (YOU SHOULD IGNORE THIS):
+- **Clause Text:** "Either Party may terminate this Agreement immediately upon written notice if the other Party becomes insolvent or is subject to bankruptcy proceedings."
+- **Why it's NOT Risky:** This is a STANDARD INSOLVENCY clause. It is mutual ("Either Party") and protects both sides. Do not flag it.
+---
+
+DOCUMENT CHUNK TO ANALYZE:
 ---
 {document_chunk}
 ---
@@ -88,12 +100,8 @@ JSON OUTPUT:"""
 
     def _analyze_chunk(self, chunk_text: str, chunk_number: int) -> Dict[Any, Any]:
         """Analyze a single chunk using direct Gemini API"""
-        print(f"DEBUG: Starting chunk {chunk_number} analysis")
-
         try:
-            print(f"DEBUG: About to create prompt")
             prompt = self._create_analysis_prompt(chunk_text)
-            print(f"DEBUG: Prompt created successfully")
             
             logger.info(f"Analyzing chunk {chunk_number} (approx {len(chunk_text)} chars)...")
             
@@ -106,19 +114,13 @@ JSON OUTPUT:"""
                 logger.error(f"Chunk {chunk_number}: Empty response from Gemini")
                 return {}
             
-            # Clean response text (remove markdown if present)
-            response_text = response.text.strip()
-            if response_text.startswith('```json'):
-                response_text = response_text[7:]
-            if response_text.endswith('```'):
-                response_text = response_text[:-3]
-            response_text = response_text.strip()
+            # Clean response text
+            response_text = response.text.strip().replace('```json', '').replace('```', '').strip()
             
             # Parse JSON
             try:
                 chunk_data = json.loads(response_text)
                 
-                # Validate only the clauses using ClauseAnalysis
                 if 'clauses' in chunk_data and isinstance(chunk_data['clauses'], list):
                     validated_clauses = []
                     for clause in chunk_data['clauses']:
@@ -129,7 +131,6 @@ JSON OUTPUT:"""
                             logger.warning(f"Skipping invalid clause: {ve}")
                             continue
                     
-                    # Update chunk_data with validated clauses
                     chunk_data['clauses'] = validated_clauses
                     logger.info(f"Chunk {chunk_number}: Successfully analyzed {len(validated_clauses)} clauses")
                 else:
@@ -157,11 +158,10 @@ JSON OUTPUT:"""
         
         # Create overlapping 2-page chunks with 1-page overlap
         chunks = []
-        for i in range(0, len(pages), 1):  # Step by 1 instead of 2 for overlap
-            chunk_end = min(i + 2, len(pages))  # Take up to 2 pages
+        for i in range(0, len(pages), 1):
+            chunk_end = min(i + 2, len(pages))
             chunk_pages = pages[i:chunk_end]
             
-            # Skip if we only have 1 page and it's not the first chunk
             if len(chunk_pages) == 1 and i > 0:
                 continue
                 
@@ -171,13 +171,11 @@ JSON OUTPUT:"""
             ])
             chunks.append(chunk_text)
             
-            # Break if we've reached the end
             if chunk_end >= len(pages):
                 break
         
         logger.info(f"Document split into {len(chunks)} overlapping chunk(s) of up to 2 pages each.")
         
-        # Process chunks quickly without delays
         successful_reports = []
         for idx, chunk in enumerate(chunks):
             chunk_result = self._analyze_chunk(chunk, idx + 1)
@@ -185,14 +183,12 @@ JSON OUTPUT:"""
             if chunk_result and 'clauses' in chunk_result:
                 successful_reports.append(chunk_result)
             
-            # Minimal delay to avoid API throttling
             if idx < len(chunks) - 1:
-                time.sleep(2)  # Just 2 seconds between chunks
+                time.sleep(2)
         
         if not successful_reports:
             return {"error": "All chunk analyses failed. Check your API quota and document format."}
         
-        # Aggregate results
         logger.info(f"Aggregating {len(successful_reports)} successful chunk(s)...")
         return self._aggregate_reports(successful_reports)
 
@@ -202,7 +198,6 @@ JSON OUTPUT:"""
             return {"error": "No reports to aggregate"}
         
         try:
-            # Collect all clauses and remove duplicates
             all_clauses = []
             seen_clauses = set()
             
@@ -210,29 +205,27 @@ JSON OUTPUT:"""
                 clauses = report.get("clauses", [])
                 if isinstance(clauses, list):
                     for clause in clauses:
-                        # Create a signature for duplicate detection
+                        # --- NECESSARY CHANGE 2: MORE ROBUST DE-DUPLICATION LOGIC ---
+                        # Use the summary for de-duplication, as titles can be inconsistent.
+                        summary_start = clause.get('clause_summary', '').lower().strip()[:100]
                         clause_signature = (
-                            clause.get('clause_title', '').lower().strip(),
+                            summary_start,
                             clause.get('page_number', 0)
                         )
                         
-                        # Only add HIGH/CRITICAL risk clauses
                         risk_level = clause.get('risk_level', '').upper()
                         if risk_level in ['HIGH', 'CRITICAL'] and clause_signature not in seen_clauses:
                             seen_clauses.add(clause_signature)
                             all_clauses.append(clause)
             
-            # Sort by risk (CRITICAL first, then HIGH) and limit to 6 clauses max
             priority_order = {'CRITICAL': 0, 'HIGH': 1}
             all_clauses.sort(key=lambda x: (
                 priority_order.get(x.get('risk_level', '').upper(), 2),
                 x.get('page_number', 0)
             ))
             
-            # Limit to maximum 6 clauses
             top_clauses = all_clauses[:6]
             
-            # Generate single comprehensive summary that includes risk assessment
             overall_summary = self._generate_comprehensive_summary(reports, top_clauses)
             
             final_report = {
@@ -253,24 +246,20 @@ JSON OUTPUT:"""
     def _generate_comprehensive_summary(self, reports: List[Dict[str, Any]], clauses: List[Dict[str, Any]]) -> str:
         """Generate a comprehensive summary combining document info and risk analysis"""
         if not clauses:
-            return "No high-risk clauses identified in the document."
+            return "No high-risk clauses identified in the document based on the specified criteria."
         
-        # Get document info from first report
-        doc_title = reports[0].get("document_title", "Legal Document") if reports else "Legal Document"
-        doc_type = reports[0].get("document_type", "Contract") if reports else "Contract"
-        
-        # Count risk levels
+        doc_title = "Legal Document"
+        doc_type = "Contract"
+
         risk_counts = {}
         for clause in clauses:
             level = clause.get("risk_level", "UNKNOWN").upper()
             risk_counts[level] = risk_counts.get(level, 0) + 1
         
-        # Build comprehensive summary
         summary_parts = [
             f"Document Analysis: {doc_title} ({doc_type})"
         ]
         
-        # Risk distribution
         if risk_counts:
             risk_desc = []
             if 'CRITICAL' in risk_counts:
@@ -281,7 +270,6 @@ JSON OUTPUT:"""
             if risk_desc:
                 summary_parts.append(f"Identified {len(clauses)} concerning clauses: {', '.join(risk_desc)}.")
         
-        # Overall assessment
         critical_count = risk_counts.get("CRITICAL", 0)
         if critical_count > 0:
             summary_parts.append("This document contains critical issues requiring immediate legal review and likely negotiation before signing.")
@@ -294,8 +282,13 @@ JSON OUTPUT:"""
 
 # --- Main Function ---
 def main():
-    doc_path = r"E:\SUMGRIND\SAMPLE LEGAL DOCS\DUMMYDOCS.txt"
+    # IMPORTANT: Replace this with the actual path to your document
+    doc_path = r"E:\SUMGRIND\SAMPLE LEGAL DOCS\sample_service_agreement_test.pdf"
     
+    if not os.path.exists(doc_path) or doc_path == r"path\to\your\document.txt":
+        print("❌ Please update the 'doc_path' variable in the main() function to point to your legal document.")
+        return
+
     try:
         analyzer = OptimizedLegalAnalyzer()
         logger.info("Starting optimized document analysis...")
@@ -313,7 +306,6 @@ def main():
         else:
             print(json.dumps(report, indent=2, ensure_ascii=False))
             
-            # Save report
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             outfile = f"legal_report_fast_{timestamp}.json"
             
